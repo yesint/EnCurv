@@ -1,0 +1,18 @@
+EnCurv method for maintaining membrane curvature.
+(c) Semen Yesylevskyy, 2020. yesint4@gmail.com
+
+How to install:
+---------------
+1) Get PLUMED source code (https://github.com/plumed/plumed2)
+2) Copy EnCurv.cpp to <plumed location>/src/colvar
+3) Compile and install PLUMED as usual 
+   (see https://www.plumed.org/doc-v2.5/user-doc/html/_installation.html)
+   
+How to run:
+-----------
+Directory "example" contains full working example for Gromacs 
+compiled with PLUMED. This is pre-equilibrated DOPC bicelle.
+The file plumed.dat contains all parameters related to EnCurv.
+To run an example:
+1) gmx grompp -f md.mdp -p -c start_structure.gro -n
+2) gmx mdrun -plumed plumed.dat

@@ -1,0 +1,20 @@
+# Define dummy atom at the center of curvature
+piv: FIXEDATOM AT=11.66,0,-1
+
+# Define the membrane by only using heavy atoms of lipids
+membr: GROUP NDX_FILE=plumed_grp.ndx NDX_GROUP=non_h
+
+# Use this instead to use all atoms in the membrane
+#membr: GROUP ATOMS=1-52992
+
+# Define EnCurv collective variable with R=10
+sec1: ENCURV ATOMS=piv,membr NBINS=50 R=10
+
+# Harmonic restraint on radial component
+restr1: RESTRAINT ARG=sec1.val KAPPA=100 AT=10 STRIDE=2
+
+# Harmonic restraint on angular component
+angrestr: RESTRAINT ARG=sec1.angle KAPPA=10000 AT=0 STRIDE=2
+
+# Pring RMSD
+PRINT STRIDE=100 ARG=sec1.rmsd,sec1.angle FILE=COLVAR
