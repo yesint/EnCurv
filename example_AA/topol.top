@@ -1,9 +1,5 @@
-; Include forcefield parameters
-
 #include "charmm36.ff/forcefield.itp"
-
 #include "DOPC.itp"
-
 #include "charmm36.ff/tip3p.itp"
 #include "charmm36.ff/ions.itp"
 
@@ -13,7 +9,6 @@ Bicelle
 
 [ molecules ]
 ; Compound        #mols
-
 DOPC             384
 SOL              41540
 NA                27

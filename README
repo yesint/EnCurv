@@ -10,8 +10,11 @@ How to install:
    
 How to run:
 -----------
-Directory "example" contains full working example for Gromacs 
-compiled with PLUMED. This is pre-equilibrated DOPC bicelle.
+Directoris "example_AA" and "example_CG" contain full working examples for 
+Gromacs using CHARMM36 and MARTINI force fields respectively 
+These are pre-equilibrated DOPC bicelle.
+Gromacs have to be compiled with PLUMED. 
+
 The file plumed.dat contains all parameters related to EnCurv.
 To run an example:
 1) gmx grompp -f md.mdp -p -c start_structure.gro -n
