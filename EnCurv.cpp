@@ -49,6 +49,7 @@ private:
   Vector center;  
   double r_target;
   double cap_size;
+  double x_span;
 
   unsigned N;  
   vector<double> angles;
@@ -80,6 +81,7 @@ void EnCurv::registerKeywords(Keywords& keys) {
   keys.add("compulsory","NBINS","50","Number of bins.");
   keys.addFlag("NO_PHI_FORCE",false,"Exclude tangential forces for equilibration.");
   keys.add("compulsory","CAP_SIZE","2.5","Caps to skip at the ends of the membrane in nm.");
+  keys.add("compulsory","XSPAN","0","Defines sector for biasing. Disables CAP_SIZE. Useful for periodic bilayers.");
   
   keys.addOutputComponent("val","val","Value");
   keys.addOutputComponent("rmsd","rmsd","RMSD");
@@ -97,13 +99,14 @@ EnCurv::EnCurv(const ActionOptions&ao):
   parse("R",r_target);
   parse("NBINS",Nbins);
   parse("CAP_SIZE",cap_size);
+  parse("XSPAN",x_span);
   parseFlag("NO_PHI_FORCE",no_phi_force);
 
   if(no_phi_force){
       log << "  PHI forces are disabled by the user!\n";
   } else {
       log << "  PHI forces are enabled.\n";
-  }
+  }  
 
   checkRead();
 
@@ -145,6 +148,12 @@ void EnCurv::calculate() {
     center = getPosition(0);
     center[1] = 0.0;
 
+    // In case of predefined sector set X to box center
+    // to accomodate for box changes
+    if(x_span){
+        center[0] = 0.5*getBox()(0,0);
+    }
+
     double min_ang = 1e10, max_ang=-1e10;
     double mean_ang = 0.0; // Average angle
     double total_mass = 0.0;
@@ -174,11 +183,19 @@ void EnCurv::calculate() {
         if(ang>max_ang) max_ang = ang;
     }
 
-    min_ang += cap_size/r_target;
-    max_ang -= cap_size/r_target;
+    if(x_span){
+        double a = asin(0.5*x_span/r_target);
+        min_ang = -a;
+        max_ang =  a;
+        // Mean angle is assumed zero
+        mean_ang = 0.0;
+    } else {
+        min_ang += cap_size/r_target;
+        max_ang -= cap_size/r_target;
+        // Get mass-weigted average angle
+        mean_ang /= total_mass;
+    }
 
-    // Get mass-weigted average angle
-    mean_ang /= total_mass;
 
     // Divide into bins and compute radial centers
     for(unsigned i=0; i<Nbins; i++) bins[i].clear();
@@ -193,8 +210,13 @@ void EnCurv::calculate() {
         unsigned b,b1,b2;
         
         b = floor((angles[i]-min_ang)/d_ang);
-        if(angles[i]<min_ang) b=0;
-        if(angles[i]>max_ang) b = Nbins-1;
+        if(x_span){
+            // For predefined sector ignore atoms outside the sector
+            if(angles[i]<min_ang || angles[i]>max_ang) continue;
+        } else {
+            if(angles[i]<min_ang) b=0;
+            if(angles[i]>max_ang) b = Nbins-1;
+        }
         
         // Set adjucent bins        
         double side = angles[i]-bins[b].ang;        
@@ -213,13 +235,38 @@ void EnCurv::calculate() {
         double s,ds;
 
         if(b1==b2){
-            // This is the edges, so just apply for the current bin without interpolation
-            atom_s[i][0] = atom_s[i][1] = 1.0;
-            bins[b].Z += m/radii[i];
-            bins[b].wm += m;
-            bins[b].N += 1;
-            // Angular component is zero
-            atom_sd[i][0] = atom_sd[i][1] = 0.0;
+            if(!x_span){
+                // This is the edges, so just apply for the current bin without interpolation
+                atom_s[i][0] = atom_s[i][1] = 1.0;
+                bins[b].Z += m/radii[i];
+                bins[b].wm += m;
+                bins[b].N += 1;
+                // Angular component is zero
+                atom_sd[i][0] = atom_sd[i][1] = 0.0;
+            } else {
+                // For predifined sector last half-bind should be ignored
+                // For left bin (1-c) is applied, for right bin (c) is applied
+                if(side<=0){
+                    smooth(bins[b1].ang-d_ang, bins[b1].ang, angles[i], s, ds);
+                    bins[b1].Z += s * m / radii[i];
+                    bins[b1].wm +=  s * m;
+                    bins[b1].N +=  s;
+                    atom_s[i][0] = 0.0;
+                    atom_s[i][1] = s;
+                    atom_sd[i][0] = 0.0;
+                    atom_sd[i][1] = +ds;
+                } else {
+                    smooth(bins[b1].ang, bins[b1].ang+d_ang, angles[i], s, ds);
+                    bins[b1].Z += (1.0-s) * m / radii[i];
+                    bins[b1].wm +=  (1.0-s) * m;
+                    bins[b1].N +=  (1.0-s);
+                    atom_s[i][0] = (1.0-s);
+                    atom_s[i][1] = 0.0;
+                    atom_sd[i][0] = -ds;
+                    atom_sd[i][1] = 0.0;
+                }
+
+            }
         } else {
             // In the middle interpolate
             smooth(bins[b1].ang, bins[b2].ang, angles[i], s, ds);
@@ -292,18 +339,20 @@ void EnCurv::calculate() {
     // Set value
     v_ptr->set(r_target+1.0); // Gives force at 1 nm if bias is set to r_target
 
-    // Angular potential
-    Value* ang_ptr=getPntrToComponent("angle");
-    // Set value
-    ang_ptr->set(mean_ang);
-    // Set derivatives
-    for(unsigned i=1; i<N; i++){
-        setAtomsDerivatives(ang_ptr,i,  -tangents[i] * getMass(i) / total_mass);
+    // Angular potential    
+    if(!x_span){ // Not used for predefined sector
+        Value* ang_ptr=getPntrToComponent("angle");
+        // Set value
+        ang_ptr->set(mean_ang);
+        // Set derivatives
+        for(unsigned i=1; i<N; i++){
+            setAtomsDerivatives(ang_ptr,i,  -tangents[i] * getMass(i) / total_mass);
+        }
+        // Zero for pivot atom
+        setAtomsDerivatives(ang_ptr,0,Vector(0,0,0));
+        // Set box derivs
+        setBoxDerivativesNoPbc(ang_ptr);
     }
-    // Zero for pivot atom
-    setAtomsDerivatives(ang_ptr,0,Vector(0,0,0));
-    // Set box derivs
-    setBoxDerivativesNoPbc(ang_ptr);
 
     // RMSD
     double rmsd = 0.0;
