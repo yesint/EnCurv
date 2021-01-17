@@ -4,7 +4,7 @@ EnCurv method for maintaining membrane curvature.
 How to install:
 ---------------
 1) Get PLUMED source code (https://github.com/plumed/plumed2)
-2) Copy EnCurv.cpp to <plumed location>/src/colvar
+2) Copy *.cpp files to <plumed location>/src/colvar
 3) Compile and install PLUMED as usual 
    (see https://www.plumed.org/doc-v2.5/user-doc/html/_installation.html)
    
@@ -13,7 +13,7 @@ How to run:
 Directoris "example_AA" and "example_CG" contain full working examples for 
 Gromacs using CHARMM36 and MARTINI force fields respectively 
 These are pre-equilibrated DOPC bicelle.
-Gromacs have to be compiled with PLUMED. 
+Gromacs have to be compiled accordingly with PLUMED support (see Plumed docs). 
 
 The file plumed.dat contains all parameters related to EnCurv.
 To run an example:
