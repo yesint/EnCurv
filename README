@@ -1,5 +1,9 @@
-EnCurv method for maintaining membrane curvature.
+EnCurv method for maintaining membrane curvature in MD simulations.
 (c) Semen Yesylevskyy, 2020. yesint4@gmail.com
+
+The method is described here:
+http://dx.doi.org/10.1021/acs.jctc.0c00800
+Please always cite this article when using EnCurv.
 
 How to install:
 ---------------
