@@ -27,6 +27,7 @@ private:
 
     double radius, force_constant;
     unsigned N;
+    int axis;
 
 public:
     explicit MembranePore(const ActionOptions&ao);
@@ -42,11 +43,9 @@ void MembranePore::registerKeywords(Keywords& keys) {
     Colvar::registerKeywords( keys );
     keys.add("atoms","ATOMS","Atoms to force");
     keys.add("compulsory","R","Desired radius.");
-    //keys.addFlag("NO_PHI_FORCE",false,"Exclude tangential forces for equilibration.");
+    keys.add("compulsory","AXIS","Pore along this axis. X=0,Y=1,Z=2");
 
     keys.addOutputComponent("val","val","Value");
-    //keys.addOutputComponent("rmsd","rmsd","RMSD");
-    //keys.addOutputComponent("angle","angle","ANGLE");
 }
 
 
@@ -58,11 +57,10 @@ MembranePore::MembranePore(const ActionOptions&ao):
     if(atoms.size()==0) error("at least one atom should be specified");
 
     parse("R",radius);
+    parse("AXIS",axis);
     checkRead();
 
     addComponentWithDerivatives("val"); componentIsNotPeriodic("val");
-    //addComponent("rmsd"); componentIsNotPeriodic("rmsd");
-    //addComponentWithDerivatives("angle"); componentIsNotPeriodic("angle");
 
     requestAtoms(atoms);
     N = atoms.size();
@@ -74,14 +72,14 @@ void MembranePore::calculate() {
 
     Value* v_ptr=getPntrToComponent("val");
 
-    // Cycle over atoms and file those inside the pore radius
+    // Cycle over atoms and find those inside the pore radius
     for(unsigned i=1; i<N; i++){
         Vector p = getPosition(i);
         Vector d = pbcDistance(center,p);
         double factor = 0.0;
 
-        if(d[2]<0){ // Below center
-            d[2] = 0.0;
+        if(d[axis]<0){ // Below center
+            d[axis] = 0.0;
             double r = d.modulo();
             if(r<radius){
                 // Inside the pore

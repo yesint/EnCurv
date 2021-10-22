@@ -63,11 +63,14 @@ private:
   vector<array<double,2>> atom_sd;
 
   bool no_phi_force;
+  bool is_tube;
 
 public:
   explicit EnCurv(const ActionOptions&ao);
   void calculate();
   static void registerKeywords( Keywords& keys );
+  int bending_axis;
+  int X_ax, Z_ax;
 };
 
 
@@ -78,10 +81,12 @@ void EnCurv::registerKeywords(Keywords& keys) {
   Colvar::registerKeywords( keys );
   keys.add("atoms","ATOMS","atoms");
   keys.add("compulsory","R","Desired radius.");
+  keys.add("compulsory","AXIS","1","Bending axis X=0,Y=1,Z=2. Default: 1.");
   keys.add("compulsory","NBINS","50","Number of bins.");
   keys.addFlag("NO_PHI_FORCE",false,"Exclude tangential forces for equilibration.");
   keys.add("compulsory","CAP_SIZE","2.5","Caps to skip at the ends of the membrane in nm.");
   keys.add("compulsory","XSPAN","0","Defines sector for biasing. Disables CAP_SIZE. Useful for periodic bilayers.");
+  keys.addFlag("TUBE",false,"Tubular geometry.");
   
   keys.addOutputComponent("val","val","Value");
   keys.addOutputComponent("rmsd","rmsd","RMSD");
@@ -98,9 +103,11 @@ EnCurv::EnCurv(const ActionOptions&ao):
   
   parse("R",r_target);
   parse("NBINS",Nbins);
+  parse("AXIS",bending_axis);
   parse("CAP_SIZE",cap_size);
   parse("XSPAN",x_span);
   parseFlag("NO_PHI_FORCE",no_phi_force);
+  parseFlag("TUBE",is_tube);
 
   if(no_phi_force){
       log << "  PHI forces are disabled by the user!\n";
@@ -109,6 +116,19 @@ EnCurv::EnCurv(const ActionOptions&ao):
   }  
 
   checkRead();
+  
+  // Geometry is defined for bending in XZ plane
+  // Mapping to actual system geometry is done by defining indexes corresponding to real coordinates
+  if(bending_axis==1){
+    X_ax = 0;
+    Z_ax = 2;
+  } else if(bending_axis==2) {
+    X_ax = 0;
+    Z_ax = 1;  
+  } else if(bending_axis==0) {
+    X_ax = 1;
+    Z_ax = 2;  
+  }
 
   addComponentWithDerivatives("val"); componentIsNotPeriodic("val");
   addComponent("rmsd"); componentIsNotPeriodic("rmsd");
@@ -146,28 +166,35 @@ void init_bins(vector<Bin>& v1){
 void EnCurv::calculate() {
     // Set center to first atom
     center = getPosition(0);
-    center[1] = 0.0;
+    center[bending_axis] = 0.0;
 
     // In case of predefined sector set X to box center
     // to accomodate for box changes
     if(x_span){
-        center[0] = 0.5*getBox()(0,0);
+        center[X_ax] = 0.5*getBox()(X_ax,X_ax);
     }
 
     double min_ang = 1e10, max_ang=-1e10;
     double mean_ang = 0.0; // Average angle
     double total_mass = 0.0;
 
-    for(unsigned i=1; i<N; i++){        
+    Vector axis_vector(0,0,0);
+    if(bending_axis==1){
+        axis_vector[bending_axis] = 1.0;
+    } else {
+        axis_vector[bending_axis] = -1.0;
+    }
+
+    for(unsigned i=1; i<N; i++){
         Vector p = getPosition(i);
-        p[1]=0.0;
+        p[bending_axis]=0.0;
         // Vector from center to atom
         vectors[i] = delta(center,p);
         double r = vectors[i].modulo();
         vectors[i] /= r; // Normalize vectors
 
         // Angle relative to Z axis from -pi to pi
-        double ang = atan2(vectors[i][0],vectors[i][2]);
+        double ang = atan2(vectors[i][X_ax],vectors[i][Z_ax]);
 
         mean_ang += getMass(i)*ang;
         total_mass += getMass(i);
@@ -177,7 +204,7 @@ void EnCurv::calculate() {
 
         // tangent vector. Note -1, it matters to get correct direction!
         // tangent is to right (in direction of phi increase)
-        tangents[i] = crossProduct(vectors[i],Vector(0,1,0));
+        tangents[i] = crossProduct(vectors[i],axis_vector);
 
         if(ang<min_ang) min_ang = ang;
         if(ang>max_ang) max_ang = ang;
@@ -194,6 +221,12 @@ void EnCurv::calculate() {
         max_ang -= cap_size/r_target;
         // Get mass-weigted average angle
         mean_ang /= total_mass;
+    }
+    
+    // In case of tube set angles to +/-pi
+    if(is_tube){
+        min_ang = -M_PI;
+        max_ang = +M_PI;
     }
 
 
@@ -213,19 +246,36 @@ void EnCurv::calculate() {
         if(x_span){
             // For predefined sector ignore atoms outside the sector
             if(angles[i]<min_ang || angles[i]>max_ang) continue;
+        } else if(is_tube) {
+            // For tube wrap bins around periodically
+            if(angles[i]<min_ang) b = Nbins-1;
+            if(angles[i]>max_ang) b = 0;
         } else {
             if(angles[i]<min_ang) b=0;
             if(angles[i]>max_ang) b = Nbins-1;
         }
         
         // Set adjucent bins        
-        double side = angles[i]-bins[b].ang;        
-        if(side<=0){
-            b1 = (b>0) ? b-1 : b;
-            b2 = b;
+        double side = angles[i]-bins[b].ang;
+        if(is_tube){
+            // For tube wrap around
+            if(side<=0){
+                b1 = (b>0) ? b-1 : Nbins-1;
+                b2 = b;
+            } else {
+                b1 = b;
+                b2 = (b<Nbins-1) ? b+1 : 0;
+            }
+            // Order bins b1<b2
+            if(b1>b2) std::swap(b1,b2);
         } else {
-            b1 = b;
-            b2 = (b<Nbins-1) ? b+1 : b;
+            if(side<=0){
+                b1 = (b>0) ? b-1 : b;
+                b2 = b;
+            } else {
+                b1 = b;
+                b2 = (b<Nbins-1) ? b+1 : b;
+            }
         }
         
         atom_bin[i][0] = b1;
