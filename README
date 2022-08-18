@@ -14,7 +14,7 @@ How to install:
    
 How to run:
 -----------
-Directoris "example_AA" and "example_CG" contain full working examples for 
+Directories "example_AA" and "example_CG" contain full working examples for 
 Gromacs using CHARMM36 and MARTINI force fields respectively 
 These are pre-equilibrated DOPC bicelle.
 Gromacs have to be compiled accordingly with PLUMED support (see Plumed docs). 
