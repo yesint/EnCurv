@@ -365,8 +365,12 @@ void EnCurv::calculate() {
                                              + bins[b2].P * bins[b2].r_mean * atom_s[i][1] ) ;
 
             // Angular component	    
-            ra  = m * (  bins[b1].P * atom_sd[i][0] * (1.0-bins[b1].r_mean/radii[i])/bins[b1].r_mean
-                       + bins[b2].P * atom_sd[i][1] * (1.0-bins[b2].r_mean/radii[i])/bins[b2].r_mean );
+            
+            //ra  = m * (  bins[b1].P * atom_sd[i][0] * (1.0-bins[b1].r_mean/radii[i])/bins[b1].r_mean
+            //           + bins[b2].P * atom_sd[i][1] * (1.0-bins[b2].r_mean/radii[i])/bins[b2].r_mean );
+                       
+            ra  = m * (  bins[b1].P * atom_sd[i][0] * (1.0-bins[b1].r_mean/radii[i])/radii[i]
+                       + bins[b2].P * atom_sd[i][1] * (1.0-bins[b2].r_mean/radii[i])/radii[i] );
             
         } else {
             // Half-bins at the ends of bicelle. No interpolation.
