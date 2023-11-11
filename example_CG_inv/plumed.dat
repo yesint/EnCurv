@@ -1,0 +1,18 @@
+# Define dummy atom at the center of curvature
+piv: FIXEDATOM AT=14.54,0,8
+
+# Define the membrane
+membr: GROUP ATOMS=1-5376
+
+# Define EnCurv collective variable with R=5
+sec1: ENCURV ATOMS=piv,membr NBINS=100  R=5 TUBE SKIP_ANGLE=45 INV_BICELLE
+
+# Harmonic restraint on radial component
+restr1: RESTRAINT ARG=sec1.val KAPPA=100   AT=5 STRIDE=2
+
+# Harmonic restraint on angular component
+angrestr: RESTRAINT ARG=sec1.angle KAPPA=10000 AT=0 STRIDE=2
+
+# Pring RMSD
+#PRINT STRIDE=100 ARG=sec1.rmsd,sec1.angle FILE=COLVAR
+

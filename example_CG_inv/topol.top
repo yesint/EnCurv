@@ -1,0 +1,11 @@
+#include "martini_v2.2.itp"
+#include "martini_v2.0_lipids.itp"
+
+[ system ]
+; name
+Bicelle
+
+[ molecules ]
+; name  number
+DOPC 384
+W 14530

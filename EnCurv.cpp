@@ -41,36 +41,48 @@ struct Bin {
     }
 };
 
+struct Atom {
+    array<unsigned,2> bin; // Two adjucent bins
+    array<double,2> s; // Weights of bins
+    array<double,2> sd; // Derivatives of s
+    double angle;
+    double radius;
+    Vector vector;
+    Vector tangent;
+    bool used;
 
-class EnCurv:
-  public Colvar
-{
+    Atom(): used(true) {}
+};
+
+
+class EnCurv: public Colvar {
 private:
-  Vector center;  
-  double r_target;
-  double cap_size;
-  double x_span;
+    unsigned N;  
+    vector<Atom> atom_prop;
 
-  unsigned N;  
-  vector<double> angles;
-  vector<double> radii;
-  vector<Vector> vectors, tangents;
+    unsigned Nbins;
+    vector<Bin> bins;  
 
-  unsigned Nbins;
-  vector<Bin> bins;
-  vector<array<unsigned,2>> atom_bin;
-  vector<array<double,2>> atom_s;
-  vector<array<double,2>> atom_sd;
+    // Options
+    Vector center;  
+    double r_target;
+    double cap_size;
+    double x_span;
 
-  bool no_phi_force;
-  bool is_tube;
+    bool no_phi_force;
+    bool is_tube;
+
+    int bending_axis;
+    int X_ax, Z_ax;
+
+    double skip_ang;
+
+    bool inv_bicelle;
 
 public:
-  explicit EnCurv(const ActionOptions&ao);
-  void calculate();
-  static void registerKeywords( Keywords& keys );
-  int bending_axis;
-  int X_ax, Z_ax;
+    explicit EnCurv(const ActionOptions&ao);
+    void calculate();
+    static void registerKeywords( Keywords& keys );
 };
 
 
@@ -78,75 +90,74 @@ PLUMED_REGISTER_ACTION(EnCurv,"ENCURV")
 
 
 void EnCurv::registerKeywords(Keywords& keys) {
-  Colvar::registerKeywords( keys );
-  keys.add("atoms","ATOMS","atoms");
-  keys.add("compulsory","R","Desired radius.");
-  keys.add("compulsory","AXIS","1","Bending axis X=0,Y=1,Z=2. Default: 1.");
-  keys.add("compulsory","NBINS","50","Number of bins.");
-  keys.addFlag("NO_PHI_FORCE",false,"Exclude tangential forces for equilibration.");
-  keys.add("compulsory","CAP_SIZE","2.5","Caps to skip at the ends of the membrane in nm.");
-  keys.add("compulsory","XSPAN","0","Defines sector for biasing. Disables CAP_SIZE. Useful for periodic bilayers.");
-  keys.addFlag("TUBE",false,"Tubular geometry.");
-  
-  keys.addOutputComponent("val","val","Value");
-  keys.addOutputComponent("rmsd","rmsd","RMSD");
-  keys.addOutputComponent("angle","angle","ANGLE");
+    Colvar::registerKeywords( keys );
+    keys.add("atoms","ATOMS","atoms");
+    keys.add("compulsory","R","Desired radius.");
+    keys.add("compulsory","AXIS","1","Bending axis X=0,Y=1,Z=2. Default: 1.");
+    keys.add("compulsory","NBINS","50","Number of bins.");
+    keys.addFlag("NO_PHI_FORCE",false,"Exclude tangential forces for equilibration.");
+    keys.add("compulsory","CAP_SIZE","2.5","Caps to skip at the ends of the membrane in nm.");
+    keys.add("compulsory","XSPAN","0","Defines sector for biasing. Disables CAP_SIZE. Useful for periodic bilayers.");
+    keys.addFlag("TUBE",false,"Tubular geometry.");
+    keys.add("compulsory","SKIP_ANGLE","0","Half-angle to skip counter from local Z axis in deg");
+    keys.addFlag("INV_BICELLE",false,"Bicelle is upside down.");
+
+    keys.addOutputComponent("val","val","Value");
+    keys.addOutputComponent("rmsd","rmsd","RMSD");
+    keys.addOutputComponent("angle","angle","ANGLE");
 }
 
-
-EnCurv::EnCurv(const ActionOptions&ao):
+// Constructor
+EnCurv::EnCurv(const ActionOptions&ao): 
     PLUMED_COLVAR_INIT(ao)
 {  
-  vector<AtomNumber> atoms;
-  parseAtomList("ATOMS",atoms);
-  if(atoms.size()==0) error("at least one atom should be specified");
-  
-  parse("R",r_target);
-  parse("NBINS",Nbins);
-  parse("AXIS",bending_axis);
-  parse("CAP_SIZE",cap_size);
-  parse("XSPAN",x_span);
-  parseFlag("NO_PHI_FORCE",no_phi_force);
-  parseFlag("TUBE",is_tube);
+    vector<AtomNumber> atoms;
+    parseAtomList("ATOMS",atoms);
+    if(atoms.size()==0) error("at least one atom should be specified!");
 
-  if(no_phi_force){
-      log << "  PHI forces are disabled by the user!\n";
-  } else {
-      log << "  PHI forces are enabled.\n";
-  }  
+    parse("R",r_target);
+    parse("NBINS",Nbins);
+    parse("AXIS",bending_axis);
+    parse("CAP_SIZE",cap_size);
+    parse("XSPAN",x_span);
+    parse("SKIP_ANGLE",skip_ang);
+    parseFlag("NO_PHI_FORCE",no_phi_force);
+    parseFlag("TUBE",is_tube);
+    parseFlag("INV_BICELLE",inv_bicelle);
 
-  checkRead();
-  
-  // Geometry is defined for bending in XZ plane
-  // Mapping to actual system geometry is done by defining indexes corresponding to real coordinates
-  if(bending_axis==1){
+    skip_ang *= M_PI/180.0; // Convert to radians
+
+    if(no_phi_force){
+        log << "  PHI forces are disabled by the user!\n";
+    } else {
+        log << "  PHI forces are enabled.\n";
+    }  
+
+    checkRead();
+
+    // Geometry is defined for bending in XZ plane
+    // Mapping to actual system geometry is done by defining indexes corresponding to real coordinates
+    if(bending_axis==1){
     X_ax = 0;
     Z_ax = 2;
-  } else if(bending_axis==2) {
+    } else if(bending_axis==2) {
     X_ax = 0;
     Z_ax = 1;  
-  } else if(bending_axis==0) {
+    } else if(bending_axis==0) {
     X_ax = 1;
     Z_ax = 2;  
-  }
+    }
 
-  addComponentWithDerivatives("val"); componentIsNotPeriodic("val");
-  addComponent("rmsd"); componentIsNotPeriodic("rmsd");
-  addComponentWithDerivatives("angle"); componentIsNotPeriodic("angle");
+    addComponentWithDerivatives("val"); componentIsNotPeriodic("val");
+    addComponent("rmsd"); componentIsNotPeriodic("rmsd");
+    addComponentWithDerivatives("angle"); componentIsNotPeriodic("angle");
 
-  N = atoms.size();
-
-  angles.resize(N);
-  radii.resize(N);
-  vectors.resize(N);
-  tangents.resize(N);
-
-  bins.resize(Nbins);
-  atom_bin.resize(N);
-  atom_s.resize(N);
-  atom_sd.resize(N);
-
-  requestAtoms(atoms);
+    // Init arrays
+    N = atoms.size();
+    atom_prop.resize(N-1); // First atom is pivot
+    bins.resize(Nbins);
+    // Init atoms
+    requestAtoms(atoms);
 }
 
 
@@ -185,29 +196,33 @@ void EnCurv::calculate() {
         axis_vector[bending_axis] = -1.0;
     }
 
-    for(unsigned i=1; i<N; i++){
+    for(unsigned i=1; i<N; i++){ // Real atoms start at 1
+        auto& at = atom_prop[i-1]; // Current atom (count start from zero)
+
+        at.used = true; // All atoms are used by default
+
         Vector p = getPosition(i);
         p[bending_axis]=0.0;
         // Vector from center to atom
-        vectors[i] = delta(center,p);
-        double r = vectors[i].modulo();
-        vectors[i] /= r; // Normalize vectors
+        at.vector = delta(center,p);
+        at.radius = at.vector.modulo();
+        at.vector /= at.radius; // Normalize vector
 
         // Angle relative to Z axis from -pi to pi
-        double ang = atan2(vectors[i][X_ax],vectors[i][Z_ax]);
-
-        mean_ang += getMass(i)*ang;
+        at.angle = atan2(at.vector[X_ax],at.vector[Z_ax]);
+        if(!inv_bicelle){
+            mean_ang += getMass(i)*at.angle;
+        } else {
+            mean_ang += getMass(i)*atan2(-at.vector[X_ax],-at.vector[Z_ax]);
+        }
         total_mass += getMass(i);
-
-        angles[i] = ang;
-        radii[i] = r;
 
         // tangent vector. Note -1, it matters to get correct direction!
         // tangent is to right (in direction of phi increase)
-        tangents[i] = crossProduct(vectors[i],axis_vector);
+        at.tangent = crossProduct(at.vector,axis_vector);
 
-        if(ang<min_ang) min_ang = ang;
-        if(ang>max_ang) max_ang = ang;
+        if(at.angle<min_ang) min_ang = at.angle;
+        if(at.angle>max_ang) max_ang = at.angle;
     }
 
     if(x_span){
@@ -229,7 +244,6 @@ void EnCurv::calculate() {
         max_ang = +M_PI;
     }
 
-
     // Divide into bins and compute radial centers
     for(unsigned i=0; i<Nbins; i++) bins[i].clear();
     double d_ang = (max_ang-min_ang)/float(Nbins);
@@ -239,24 +253,31 @@ void EnCurv::calculate() {
 
     // Each atom contributes to two adjucent bins
     for(unsigned i=1; i<N; i++){
-        // Current bin
+        auto& at = atom_prop[i-1]; // Current atom
+
+        // Current bin and two
         unsigned b,b1,b2;
         
-        b = floor((angles[i]-min_ang)/d_ang);
+        b = floor((at.angle-min_ang)/d_ang);
+        
         if(x_span){
             // For predefined sector ignore atoms outside the sector
-            if(angles[i]<min_ang || angles[i]>max_ang) continue;
+            if(at.angle<min_ang || at.angle>max_ang){
+                at.used = false;
+                continue;
+            }
         } else if(is_tube) {
             // For tube wrap bins around periodically
-            if(angles[i]<min_ang) b = Nbins-1;
-            if(angles[i]>max_ang) b = 0;
+            if(at.angle<min_ang) b = Nbins-1;
+            if(at.angle>max_ang) b = 0;
         } else {
-            if(angles[i]<min_ang) b=0;
-            if(angles[i]>max_ang) b = Nbins-1;
+            if(at.angle<min_ang) b=0;
+            if(at.angle>max_ang) b = Nbins-1;
         }
         
         // Set adjucent bins        
-        double side = angles[i]-bins[b].ang;
+        double side = at.angle-bins[b].ang;
+        
         if(is_tube){
             // For tube wrap around
             if(side<=0){
@@ -268,6 +289,29 @@ void EnCurv::calculate() {
             }
             // Order bins b1<b2
             if(b1>b2) std::swap(b1,b2);
+            
+            // Account for skip_ang
+            if(abs(at.angle)<skip_ang || M_PI-abs(at.angle)<skip_ang){
+                // Check if bin b is completely in skipped sector
+                if((abs(bins[b].ang-0.5*d_ang)<skip_ang && abs(bins[b].ang+0.5*d_ang)<skip_ang)
+                   || 
+                   (M_PI-abs(bins[b].ang-0.5*d_ang)<skip_ang && M_PI-abs(bins[b].ang+0.5*d_ang)<skip_ang)
+                ){
+                    // Whole bin is in skipped sector, do not use atom at all
+                    at.used = false;
+                    continue;
+                } else {
+                    // Part of bin is not in skipped sector, apply force from adjucent bin
+                    // from the side which is not skipped
+                    if(at.angle<0){
+                        b2=b1;
+                    } else {
+                        b1=b2;
+                    }
+                    // This will trigger smooth interpolation from the left or right bin
+                }
+            }
+            
         } else {
             if(side<=0){
                 b1 = (b>0) ? b-1 : b;
@@ -278,73 +322,73 @@ void EnCurv::calculate() {
             }
         }
         
-        atom_bin[i][0] = b1;
-        atom_bin[i][1] = b2;
+        at.bin[0] = b1;
+        at.bin[1] = b2;
         
         double m = getMass(i);
         double s,ds;
 
         if(b1==b2){
             if(!x_span){
-                // This is the edges, so just apply for the current bin without interpolation
-                atom_s[i][0] = atom_s[i][1] = 1.0;
-                bins[b].Z += m/radii[i];
+                // This is the edge, so just apply for the current bin without interpolation
+                at.s[0] = at.s[1] = 1.0;
+                bins[b].Z += m/at.radius;
                 bins[b].wm += m;
                 bins[b].N += 1;
                 // Angular component is zero
-                atom_sd[i][0] = atom_sd[i][1] = 0.0;
+                at.sd[0] = at.sd[1] = 0.0;
             } else {
                 // For predifined sector last half-bind should be ignored
                 // For left bin (1-c) is applied, for right bin (c) is applied
                 if(side<=0){
-                    smooth(bins[b1].ang-d_ang, bins[b1].ang, angles[i], s, ds);
-                    bins[b1].Z += s * m / radii[i];
+                    smooth(bins[b1].ang-d_ang, bins[b1].ang, at.angle, s, ds);
+                    bins[b1].Z += s * m / at.radius;
                     bins[b1].wm +=  s * m;
                     bins[b1].N +=  s;
-                    atom_s[i][0] = 0.0;
-                    atom_s[i][1] = s;
-                    atom_sd[i][0] = 0.0;
-                    atom_sd[i][1] = +ds;
+                    at.s[0] = 0.0;
+                    at.s[1] = s;
+                    at.sd[0] = 0.0;
+                    at.sd[1] = +ds;
                 } else {
-                    smooth(bins[b1].ang, bins[b1].ang+d_ang, angles[i], s, ds);
-                    bins[b1].Z += (1.0-s) * m / radii[i];
+                    smooth(bins[b1].ang, bins[b1].ang+d_ang, at.angle, s, ds);
+                    bins[b1].Z += (1.0-s) * m / at.radius;
                     bins[b1].wm +=  (1.0-s) * m;
                     bins[b1].N +=  (1.0-s);
-                    atom_s[i][0] = (1.0-s);
-                    atom_s[i][1] = 0.0;
-                    atom_sd[i][0] = -ds;
-                    atom_sd[i][1] = 0.0;
+                    at.s[0] = (1.0-s);
+                    at.s[1] = 0.0;
+                    at.sd[0] = -ds;
+                    at.sd[1] = 0.0;
                 }
 
             }
         } else {
             // In the middle interpolate
-            smooth(bins[b1].ang, bins[b2].ang, angles[i], s, ds);
+            smooth(bins[b1].ang, bins[b2].ang, at.angle, s, ds);
             // For left bin (1-c) is applied, for right bin (c) is applied
-            bins[b1].Z += (1.0-s) * m / radii[i];
+            bins[b1].Z += (1.0-s) * m / at.radius;
             bins[b1].wm +=  (1.0-s) * m;
             bins[b1].N +=  (1.0-s);
 
-            bins[b2].Z += s * m / radii[i];
+            bins[b2].Z += s * m / at.radius;
             bins[b2].wm +=  s * m;
             bins[b2].N +=  s;
 
-            atom_s[i][0] = (1.0-s);
-            atom_s[i][1] = s;
+            at.s[0] = (1.0-s);
+            at.s[1] = s;
 
-            atom_sd[i][0] = -ds;
-            atom_sd[i][1] = +ds;
+            at.sd[0] = -ds;
+            at.sd[1] = +ds;
         }
     }
 
     // Compute r_com for all bins
-    for(unsigned b=0; b<Nbins; b++){
-        if(bins[b].Z>0){
-            bins[b].r_mean = bins[b].wm/bins[b].Z;
-            bins[b].P = (bins[b].r_mean-r_target)/bins[b].Z;
+    for(auto& bin: bins){
+        if(bin.Z>0){
+            bin.r_mean = bin.wm/bin.Z;
+            bin.P = (bin.r_mean-r_target)/bin.Z;
         } else {
-            bins[b].r_mean = r_target;
-            bins[b].P = 0.0;
+            bin.r_mean = r_target;
+            bin.P = 0.0;
         }
     }
 
@@ -352,42 +396,45 @@ void EnCurv::calculate() {
 
     // For each atom find deviation from target_r
     for(unsigned i=1; i<N; i++){
-        unsigned b1 = atom_bin[i][0];
-        unsigned b2 = atom_bin[i][1];
+        auto& at = atom_prop[i-1]; // Current atom
+        
+        if(at.used){ 
+            unsigned b1 = at.bin[0];
+            unsigned b2 = at.bin[1];
 
-        double rv,ra;
-        double m = getMass(i);
+            double rv,ra;
+            double m = getMass(i);
 
-        if(b1!=b2){
-            // Midlle of bicelle with interpolating between two bins
-            // Radial component
-            rv  = (m/(radii[i]*radii[i])) * (  bins[b1].P * bins[b1].r_mean * atom_s[i][0]
-                                             + bins[b2].P * bins[b2].r_mean * atom_s[i][1] ) ;
+            if(b1!=b2){
+                // Midlle of bicelle with interpolating between two bins
+                // Radial component
+                rv  = (m/pow(at.radius,2)) * (  bins[b1].P * bins[b1].r_mean * at.s[0]
+                                              + bins[b2].P * bins[b2].r_mean * at.s[1] ) ;
 
-            // Angular component	    
-            
-            //ra  = m * (  bins[b1].P * atom_sd[i][0] * (1.0-bins[b1].r_mean/radii[i])/bins[b1].r_mean
-            //           + bins[b2].P * atom_sd[i][1] * (1.0-bins[b2].r_mean/radii[i])/bins[b2].r_mean );
-                       
-            ra  = m * (  bins[b1].P * atom_sd[i][0] * (1.0-bins[b1].r_mean/radii[i])/radii[i]
-                       + bins[b2].P * atom_sd[i][1] * (1.0-bins[b2].r_mean/radii[i])/radii[i] );
-            
+                // Angular component
+                ra  = m * ( bins[b1].P * at.sd[0] * (1.0-bins[b1].r_mean/at.radius)/at.radius
+                          + bins[b2].P * at.sd[1] * (1.0-bins[b2].r_mean/at.radius)/at.radius );
+                
+            } else {
+                // Half-bins at the ends of bicelle. No interpolation.
+                rv  = bins[b1].P * bins[b1].r_mean * m * at.s[0] / pow(at.radius,2);
+                // Angular component is zero here
+                ra = 0.0;
+            }
+
+            if(!no_phi_force && abs(ra)<abs(rv*10.0)){
+                setAtomsDerivatives(v_ptr,i, at.vector*rv - at.tangent*ra);
+            } else {
+                setAtomsDerivatives(v_ptr,i, at.vector*rv);
+            }
         } else {
-            // Half-bins at the ends of bicelle. No interpolation.
-            rv  = bins[b1].P * bins[b1].r_mean * m * atom_s[i][0] / pow(radii[i],2);
-            // Angular component is zero here
-            ra = 0.0;
-        }
-
-        if(!no_phi_force){
-            setAtomsDerivatives(v_ptr,i, vectors[i]*rv - tangents[i]*ra);
-        } else {
-            setAtomsDerivatives(v_ptr,i, vectors[i]*rv);
+            // Atom not used. Set all derivatives to zero
+            setAtomsDerivatives(v_ptr,i, Vector(0,0,0));
         }
     }
 
     // Set derivatives for zero for pivot atom
-    setAtomsDerivatives(v_ptr,0,Vector(0,0,0));
+    setAtomsDerivatives(v_ptr,0, Vector(0,0,0));
     // Set box derivs
     setBoxDerivativesNoPbc(v_ptr);
     // Set value
@@ -400,7 +447,7 @@ void EnCurv::calculate() {
         ang_ptr->set(mean_ang);
         // Set derivatives
         for(unsigned i=1; i<N; i++){
-            setAtomsDerivatives(ang_ptr,i,  -tangents[i] * getMass(i) / total_mass);
+            setAtomsDerivatives(ang_ptr,i, -atom_prop[i-1].tangent * getMass(i) / total_mass);
         }
         // Zero for pivot atom
         setAtomsDerivatives(ang_ptr,0,Vector(0,0,0));
